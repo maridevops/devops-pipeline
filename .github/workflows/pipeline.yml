@@ -54,13 +54,18 @@ jobs:
             --label "org.opencontainers.image.revision=$COMMIT_SHA" \
             -t devops-api:test .
       - name: Testar container em execucao
+        shell: bash
         env:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           docker run -d --name api --read-only --tmpfs /tmp --cap-drop ALL \
             --security-opt no-new-privileges -p 127.0.0.1:8000:8000 devops-api:test
-          curl --fail --retry 15 --retry-delay 2 --retry-connrefused http://127.0.0.1:8000/health
-          curl --fail -s http://127.0.0.1:8000/version | \
+          # Docker pode aceitar a conexao antes de o Uvicorn estar pronto.
+          # Repetir tambem resets de conexao, com tempo de espera limitado.
+          curl --fail --silent --show-error --retry 15 --retry-delay 2 \
+            --retry-all-errors --retry-max-time 60 --connect-timeout 2 --max-time 3 \
+            http://127.0.0.1:8000/health
+          curl --fail --silent --show-error --connect-timeout 2 --max-time 5 http://127.0.0.1:8000/version | \
             python -c 'import json,os,sys; assert json.load(sys.stdin)["version"] == os.environ["COMMIT_SHA"]'
       - name: Publicar a mesma imagem testada no GHCR
         if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
